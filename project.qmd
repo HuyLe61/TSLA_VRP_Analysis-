@@ -56,7 +56,8 @@ Stock prices are driven by a mix of economic fundamentals, investor sentiment, a
 
 Every trading day, financial markets produce a stream of prices, volumes, and derived indicators that unfold in sequence. Because this data is naturally ordered by time, time series analysis offers a natural lens for studying it. ARIMA models, for instance, describe how a variable's recent values and recent forecast errors carry forward into the future, while SARIMAX models build on this by allowing for seasonal rhythms and the influence of outside variables [@shumway17; @hamilton1994]. These frameworks fit financial data well because many market quantities tend to be persistent and mean-reverting, patterns that methods ignoring temporal order would overlook.
 
-Of all the quantities worth modeling, volatility is arguably the most useful. Predicting whether a stock will go up or down is famously difficult; the efficient market hypothesis holds that prices already reflect available information, so returns behave roughly like a random walk [@fama1970]. Volatility tells a different story. It clusters: calm periods tend to follow calm periods, and turbulent ones tend to persist. This predictability has real economic value. A trader who can anticipate a spike in volatility can hedge a portfolio with options, whose prices are tied directly to expected volatility, or scale down positions before the storm hits. Conversely, when implied volatility overshoots what actually materializes, strategies like selling straddles can profit from the gap [@bollerslev1986]. Realized volatility (RV), computed from observed returns, gives the ground truth for how much a stock actually moved, and forecasting it well is central to option pricing, risk budgeting, and portfolio construction.
+Predicting whether a stock will go up or down is famously difficult. The efficient market hypothesis holds that prices already reflect available information, so returns behave roughly like a random walk [@fama1970]. Volatility tells a different story. 
+It clusters, where calm periods tend to follow calm periods, and turbulent ones tend to persist. A trader who can anticipate a spike in volatility can hedge a portfolio with options, whose prices are tied directly to expected volatility, or scale down positions before the storm hits. Conversely, when implied volatility rose above what actually realized, strategies like selling straddles can profit from the gap [@bollerslev1986]. Realized volatility (RV), computed from observed returns, measures how much a stock actually moved, and forecasting it well is critical to option pricing, risk budgeting, and portfolio construction.
 
 We focus on Google (Alphabet, ticker GOOG), one of the most liquid large-cap equities globally. Its volatility is shaped by both company-specific events like earnings reports and regulatory actions and by broader market forces. The question we set out to answer is: **can market-wide volatility, as measured by the VIX index, improve forecasts of Google's realized volatility beyond what the stock's own history provides?**
 
@@ -68,7 +69,7 @@ Our data runs from January 2019 through December 2025, a window that covers the 
 
 ## Realized volatility construction
 
-We download daily GOOG closing prices and compute daily log returns $r_t = \log(P_t / P_{t-1})$. Realized volatility over a 5-day (weekly) window is then
+We download daily GOOG closing prices and compute daily log returns $r_t = \log(P_t / P_{t-1})$. Realized volatility over a 5-day (weekly) window is given by 
 $$
 \text{RV}_t = \hat\sigma_t \sqrt{252}, \quad \hat\sigma_t = \text{std}(r_{t-4}, \ldots, r_t),
 $$
@@ -78,7 +79,7 @@ To avoid mechanical autocorrelation from overlapping windows, we retain every 5t
 
 ## Exogenous variables
 
-We also download the VIX index and extract GOOG daily trading volume over the same period. After merging onto the non-overlapping dates (forward-filling VIX for any missing days), each observation carries three potential predictors: lagged Log RV values, the VIX level, and trading volume.
+We also download the VIX index and extract GOOG daily trading volume over the same period. After merging onto the non-overlapping dates (forward-filling VIX for any missing days), each observation carries three predictors: lagged Log RV values, the VIX level, and trading volume.
 
 @fig-logrv shows the resulting Log RV series. The COVID spike in early 2020 is the dominant feature, followed by elevated volatility during the 2022 tightening cycle. @fig-exog displays the VIX and volume series for context.
 
@@ -94,7 +95,7 @@ Image(filename='plot/log_realized_volatility_google.png', width=600)
 ```{python}
 #| echo: false
 #| label: fig-exog
-#| fig-cap: "Exogenous variables: VIX index and GOOG daily trading volume over the sample period."
+#| fig-cap: "VIX index and GOOG daily trading volume over the sample period."
 #| fig-pos: "H"
 Image(filename='plot/exogenous_variables.png', width=600)
 ```
@@ -115,32 +116,32 @@ Image(filename='plot/train_test_split.png', width=600)
 
 ## Stationarity
 
-The Augmented Dickey-Fuller test on the training Log RV yields a test statistic of $-5.32$ ($p < 10^{-5}$), strongly rejecting the unit root null. The series is stationary, so no differencing is needed ($d = 0$).
+We apply two complementary tests to assess stationarity. The Augmented Dickey-Fuller (ADF) test, whose null hypothesis is that the series contains a unit root, yields a test statistic of $-5.32$ ($p < 10^{-5}$), strongly rejecting the unit root null [@hamilton1994]. However, rejecting a unit root does not by itself establish stationarity. It only implies the series does not follow a random walk. To confirm stationarity from the opposite direction, we run the KPSS test [@kpss1992], whose null hypothesis is that the series is stationary. The KPSS test returns $p = 0.309$, so we fail to reject stationarity at any conventional significance level. Taken together, the two tests agree that the Log RV series is stationary and no differencing is needed.
 
 ## Autocorrelation structure
 
-@fig-acf shows the ACF and PACF of training Log RV. The ACF decays slowly, consistent with the well-documented long-memory behavior of volatility [@andersen2003; @granger1996]. The PACF shows significant spikes at lags 1--3, suggesting AR components of order at least 3. Both functions show mild structure around lag 4, motivating a seasonal component with period $s = 4$ (roughly monthly in weekly data).
+@fig-acf shows the ACF and PACF of training Log RV. The ACF is generally noisy, but there is a slight decreasing trend, consistent with the well-documented long-memory behavior of volatility [@andersen2003; @granger1996]. The PACF shows significant spikes at lags 1-2, suggesting AR components of order at least 2. Both functions show mild structure around lag 4, motivating a seasonal component with period $s = 4$ (roughly monthly in weekly data).
 
 ```{python}
 #| echo: false
 #| label: fig-acf
-#| fig-cap: "ACF and PACF of training Log RV. Significant autocorrelation persists well beyond lag 10; the PACF cuts off sharply after lag 3 with minor structure near lag 4."
+#| fig-cap: "ACF and PACF of training Log RV."
 #| fig-pos: "H"
 Image(filename='plot/acf_pacf.png', width=600)
 ```
 
 ## Spectral analysis
 
-@fig-spectrum presents the raw periodogram and a smoothed spectral density estimate. The raw periodogram, computed via the discrete Fourier transform, is an inconsistent estimator of the true spectral density because its variance does not decrease with sample size [@shumway17]. To obtain a more stable estimate, we apply Welch's method [@welch1967], which divides the series into overlapping segments, computes a periodogram for each segment, and averages them. This trading of frequency resolution for reduced variance produces a much cleaner picture of the dominant periodicities.
+@fig-spectrum presents the raw periodogram and a smoothed spectral density estimate. The raw periodogram, computed via the discrete Fourier transform, is an inconsistent estimator of the true spectral density because its variance does not decrease with sample size [@shumway17]. To obtain a more stable estimate, we apply Welch's method [@notes531; @welch1967], which divides the series into overlapping segments, computes a periodogram for each segment, and averages them. This trading of frequency resolution for reduced variance aligns with our dataset since there are few, dominant periodicities.
 
-The raw periodogram shows elevated power near frequency zero, but this should not be interpreted as a genuine long-period cycle. With only about 280 training observations, the lowest resolvable frequencies correspond to periods of 100+ weeks, meaning the series contains too few complete cycles at those frequencies for the estimate to be reliable. This kind of low-frequency inflation is a well-known artifact in short financial time series and typically reflects the slow mean-reversion and persistence of volatility rather than any true periodicity [@granger1996].
+The raw periodogram shows elevated power near frequency zero, but this should not be interpreted as a genuine long-period cycle. With only about 280 training observations, the lowest resolvable frequencies correspond to periods of 140 observations (weeks), meaning the series contains too few complete cycles at those frequencies for the estimate to be reliable. This kind of low-frequency inflation is a well-known artifact in short financial time series and typically reflects the slow mean-reversion and persistence of volatility rather than any true periodicity [@granger1996].
 
 The more meaningful feature is a peak near frequency 0.24 cycles per observation, corresponding to a period of approximately 4.2 weeks, which we round to 4 weeks. This aligns with the seasonal period $s = 4$ that we adopt in our SARIMA specifications, and it likely reflects the monthly cadence of earnings-related news flow and options expiration cycles that periodically elevate stock volatility.
 
 ```{python}
 #| echo: false
 #| label: fig-spectrum
-#| fig-cap: "Raw periodogram (top) and Welch-smoothed spectral density (bottom) of training Log RV."
+#| fig-cap: "Raw periodogram (top) and Welch-smoothed spectral density (bottom)."
 #| fig-pos: "H"
 Image(filename='plot/periodogram_and_spectral_density.png', width=600)
 ```

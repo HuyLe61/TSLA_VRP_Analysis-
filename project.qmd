@@ -50,17 +50,19 @@ warnings.filterwarnings('ignore')
 
 ## Abstract {.unnumbered}
 
-We model the weekly log realized volatility (Log RV) of Google (GOOG) stock from 2019 to 2025 using ARIMA and SARIMAX frameworks. After constructing non-overlapping 5-day realized volatility estimates and merging exogenous variables (VIX and trading volume), we conduct an extensive AIC-based model selection over ARIMA, SARIMA, and SARIMAX specifications. The best pure time series model is ARIMA(3,0,3), while incorporating the VIX index as an exogenous regressor yields a SARIMAX(3,0,3)(0,0,1)$_4$ model with substantially lower AIC. One-step-ahead rolling forecasts on a held-out test set confirm that the SARIMAX model outperforms the ARIMA baseline on RMSE, MAE, and MAPE, demonstrating that market-wide fear captured by VIX provides genuine predictive power for individual stock volatility.
+Stock prices are driven by a mix of economic fundamentals, investor sentiment, and external shocks, making them inherently difficult to predict. While forecasting price direction remains elusive, volatility exhibits strong temporal persistence that time series models can exploit. We study the weekly log realized volatility (Log RV) of Google (GOOG) from 2019 to 2025 using ARIMA and SARIMAX frameworks. An extensive AIC-based grid search identifies ARIMA(3,0,3) as the best univariate model. Incorporating the VIX index as an exogenous regressor yields SARIMAX(3,0,3)(0,0,1)$_4$ with substantially lower AIC. One-step-ahead rolling forecasts on a held-out test set confirm that the SARIMAX model outperforms the ARIMA baseline on RMSE, MAE, and MAPE, demonstrating that market-wide fear captured by VIX provides genuine predictive power for individual stock volatility.
 
 # Introduction
 
-Realized volatility (RV) is a key quantity in financial risk management. Unlike implied volatility, which is forward-looking and derived from option prices, RV is computed directly from observed returns and provides an ex-post measure of how much a stock actually moved. Accurate forecasting of RV is essential for portfolio allocation, option pricing, and risk budgeting.
+Every trading day, financial markets produce a stream of prices, volumes, and derived indicators that unfold in sequence. Because this data is naturally ordered by time, time series analysis offers a natural lens for studying it. ARIMA models, for instance, describe how a variable's recent values and recent forecast errors carry forward into the future, while SARIMAX models build on this by allowing for seasonal rhythms and the influence of outside variables [@shumway17; @hamilton1994]. These frameworks fit financial data well because many market quantities tend to be persistent and mean-reverting, patterns that methods ignoring temporal order would overlook.
 
-Google (Alphabet, ticker GOOG) is one of the most liquid large-cap equities globally. Its volatility dynamics are shaped by both idiosyncratic events (earnings, regulation, product launches) and systematic market forces. We ask: **can market-wide volatility, as measured by the VIX index, improve forecasts of Google's realized volatility beyond what is achievable with the stock's own history alone?**
+Of all the quantities worth modeling, volatility is arguably the most useful. Predicting whether a stock will go up or down is famously difficult; the efficient market hypothesis holds that prices already reflect available information, so returns behave roughly like a random walk [@fama1970]. Volatility tells a different story. It clusters: calm periods tend to follow calm periods, and turbulent ones tend to persist. This predictability has real economic value. A trader who can anticipate a spike in volatility can hedge a portfolio with options, whose prices are tied directly to expected volatility, or scale down positions before the storm hits. Conversely, when implied volatility overshoots what actually materializes, strategies like selling straddles can profit from the gap [@bollerslev1986]. Realized volatility (RV), computed from observed returns, gives the ground truth for how much a stock actually moved, and forecasting it well is central to option pricing, risk budgeting, and portfolio construction.
 
-The VIX, often called the "investor fear gauge" [@whaley2000], measures the market's expectation of 30-day S&P 500 volatility implied by option prices. Prior literature has established that realized volatility exhibits long memory and strong persistence [@andersen2003; @granger1996], motivating ARMA-type models on log-transformed RV. We extend this by incorporating VIX as an exogenous regressor in a SARIMAX framework and evaluating whether it improves out-of-sample prediction.
+We focus on Google (Alphabet, ticker GOOG), one of the most liquid large-cap equities globally. Its volatility is shaped by both company-specific events like earnings reports and regulatory actions and by broader market forces. The question we set out to answer is: **can market-wide volatility, as measured by the VIX index, improve forecasts of Google's realized volatility beyond what the stock's own history provides?**
 
-Our data spans January 2019 to December 2025, covering the COVID crash, the post-pandemic recovery, and the 2022 rate-hike cycle — a period with substantial variation in volatility regimes.
+The VIX is often called the "investor fear gauge" because it captures the market's expectation of near-term S\&P 500 volatility as implied by option prices [@whaley2000]. Prior work has shown that realized volatility exhibits long memory and strong persistence [@andersen2003; @granger1996], which motivates fitting ARMA-type models to log-transformed RV. We take this a step further by adding VIX as an exogenous regressor within a SARIMAX framework and testing whether it actually improves out-of-sample forecasts.
+
+Our data runs from January 2019 through December 2025, a window that covers the COVID crash, the post-pandemic recovery, and the 2022 rate-hike cycle, giving us a wide range of volatility regimes to work with.
 
 # Data and Preprocessing
 
@@ -129,9 +131,11 @@ Image(filename='plot/acf_pacf.png', width=600)
 
 ## Spectral analysis
 
-@fig-spectrum presents the raw periodogram and the Welch-smoothed spectral density. The raw periodogram is noisy at low frequencies, which is expected since it is an inconsistent estimator of the spectral density [@shumway17]. The high power near frequency zero reflects the long-memory persistence of volatility rather than a genuine long-period cycle [@granger1996].
+@fig-spectrum presents the raw periodogram and a smoothed spectral density estimate. The raw periodogram, computed via the discrete Fourier transform, is an inconsistent estimator of the true spectral density because its variance does not decrease with sample size [@shumway17]. To obtain a more stable estimate, we apply Welch's method [@welch1967], which divides the series into overlapping segments, computes a periodogram for each segment, and averages them. This trading of frequency resolution for reduced variance produces a much cleaner picture of the dominant periodicities.
 
-The more interpretable feature is a broad peak near frequency 0.04 cycles per observation (period $\approx$ 25 weeks, or roughly 6 months), along with elevated power near 0.25 (period $\approx$ 4 weeks). The latter aligns with the seasonal period $s = 4$ used in our SARIMA specifications.
+The raw periodogram shows elevated power near frequency zero, but this should not be interpreted as a genuine long-period cycle. With only about 280 training observations, the lowest resolvable frequencies correspond to periods of 100+ weeks, meaning the series contains too few complete cycles at those frequencies for the estimate to be reliable. This kind of low-frequency inflation is a well-known artifact in short financial time series and typically reflects the slow mean-reversion and persistence of volatility rather than any true periodicity [@granger1996].
+
+The more meaningful feature is a peak near frequency 0.24 cycles per observation, corresponding to a period of approximately 4.2 weeks, which we round to 4 weeks. This aligns with the seasonal period $s = 4$ that we adopt in our SARIMA specifications, and it likely reflects the monthly cadence of earnings-related news flow and options expiration cycles that periodically elevate stock volatility.
 
 ```{python}
 #| echo: false
@@ -246,7 +250,7 @@ We produce one-step-ahead rolling forecasts on the 71-observation test set. At e
 | Train $R^2$ | 0.199 | **0.213** |
 : Out-of-sample forecast metrics. Bold indicates the better model. {#tbl-metrics}
 
-The SARIMAX model reduces RMSE by 8% and MAE by 9% relative to the pure ARIMA. Perhaps most strikingly, the ARIMA model achieves negative test $R^2$, meaning it performs worse than simply predicting the test-set mean. The SARIMAX model achieves a small but positive test $R^2$ of 0.076, demonstrating that VIX provides genuine out-of-sample predictive content.
+The SARIMAX model reduces RMSE by 8% and MAE by 9% relative to the pure ARIMA. The ARIMA model achieves a negative test $R^2$, meaning it performs worse than simply predicting the test-set mean, while the SARIMAX model achieves a small but positive test $R^2$ of 0.076. These low $R^2$ values are not an anomaly but rather a direct implication of standard volatility models, as @andersen1998 demonstrated. Realized volatility contains a large unpredictable component driven by news arrivals, earnings surprises, and sudden shifts in sentiment, so even well-specified models typically achieve out-of-sample $R^2$ in the range of 0.05 to 0.15 at weekly horizons. In that context, the SARIMAX result sits comfortably within the expected range and confirms that VIX provides genuine out-of-sample predictive content.
 
 ## Forecast plots
 
@@ -284,13 +288,3 @@ AI (Claude, Anthropic) was used for debugging code, formatting assistance, and e
 
 ::: {#refs}
 :::
-
-# Supplementary Material {#sec-supp}
-
-## AIC grid search details
-
-The full ARIMA grid searched 36 models ($p, q \in \{0,\ldots,5\}$); the SARIMA grid searched 64 models ($p, q \in \{0,\ldots,3\}$, $P, Q \in \{0,1\}$, $s=4$); and the SARIMAX grid searched 192 models (64 SARIMA specifications $\times$ 3 exogenous configurations). Models that failed to converge were excluded. All fitting used `statsmodels` SARIMAX with `enforce_stationarity=False` and `enforce_invertibility=False` to allow the optimizer full flexibility; root checks were performed post-hoc.
-
-## Causality and invertibility
-
-For both selected models, we verified the AR and MA polynomial roots. The ARIMA(3,0,3) model has all AR roots with modulus $> 1$ (causal) and MA roots with modulus $> 1$ (invertible). The SARIMAX model's non-seasonal roots also satisfy these conditions. The ADF test on residuals of both models rejects the unit root null ($p < 10^{-5}$), confirming stationarity.

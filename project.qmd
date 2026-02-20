@@ -1,6 +1,6 @@
 ---
-title: "Time Series Modeling of Google Realized Volatility with Exogenous Market Signals\\vspace{-2cm}"
-author: "Huy Le"
+title: "Time Series Analysis of Google Realized Volatility"
+author: "Huy Le and Tyler Yee"
 date: "February 2026"
 date-format: "MMMM YYYY"
 bibliography: references.bib
